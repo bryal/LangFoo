@@ -180,6 +180,7 @@ instance Show Func where
     Log -> "log"
 
 data Expr = Const Double
+          | Eq  Expr Expr
           | Mul Expr Expr
           | Div Expr Expr
           | Add Expr Expr
@@ -190,6 +191,7 @@ showBinop op a b = "(" ++ show a ++ " " ++ op ++ " " ++ show b ++ ")"
 
 instance Show Expr where
   show (Const x) = show x
+  show (Eq  a b) = showBinop "=" a b
   show (Mul a b) = showBinop "*" a b
   show (Div a b) = showBinop "/" a b
   show (Add a b) = showBinop "+" a b
@@ -218,7 +220,9 @@ app        = Map (\((f, _), arg) -> App f arg) (func ~& wss ~& funcArg)
 parens     = between (Str "(" ~& wssOpt) expr (wssOpt ~& Str ")")
 factor     = Any [ const', app, parens ]
 
-mulArg     = factor
+eqArg      = factor
+eq         = binop eqArg "=" Eq
+mulArg     = Any [eq, eqArg]
 mul        = binop mulArg "*" Mul
 divArg     = Any [mul, mulArg]
 div'       = binop divArg "/" Div
@@ -229,4 +233,6 @@ sub        = binop subArg "-" Sub
 
 expr       = Any [sub, subArg]
 
--- Operator precedence: *, /, +, -
+-- Operator precedence: *, /, +, -, =
+
+parseExpr = parseExact' expr

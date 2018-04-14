@@ -2,13 +2,32 @@ module Eval where
 
 import           Parse
 
-eval :: Expr -> Double
-eval (Const x)   = x
-eval (Mul a b)   = eval a * eval b
-eval (Div a b)   = eval a / eval b
-eval (Add a b)   = eval a + eval b
-eval (Sub a b)   = eval a - eval b
-eval (App Sin e) = sin (eval e)
-eval (App Cos e) = cos (eval e)
-eval (App Exp e) = exp (eval e)
-eval (App Log e) = log (eval e)
+data Val = RealVal Double
+         | BoolVal Bool
+  deriving Eq
+
+instance Show Val where
+  show (RealVal x) = show x
+  show (BoolVal b) = show b
+
+eval :: Expr -> Val
+eval (Const x)   = RealVal x
+eval (Eq  a b)   = BoolVal (eval a == eval b)
+eval (Mul a b)   = RealVal (evalReal a * evalReal b)
+eval (Div a b)   = RealVal (evalReal a / evalReal b)
+eval (Add a b)   = RealVal (evalReal a + evalReal b)
+eval (Sub a b)   = RealVal (evalReal a - evalReal b)
+eval (App Sin e) = RealVal (sin (evalReal e))
+eval (App Cos e) = RealVal (cos (evalReal e))
+eval (App Exp e) = RealVal (exp (evalReal e))
+eval (App Log e) = RealVal (log (evalReal e))
+
+evalReal :: Expr -> Double
+evalReal e = case eval e of
+  RealVal x -> x
+  _         -> error "Type error. Expected real."
+
+evalBool :: Expr -> Bool
+evalBool e = case eval e of
+  BoolVal b -> b
+  _         -> error "Type error. Expected bool."
