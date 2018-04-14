@@ -3,7 +3,7 @@
 Not sure what this is gonna be. Mostly just experimenting with parsing and stuff in Haskell.
 
 ** License
-   Copyright (C) 2017 Johan Johansson
+   Copyright (C) 2018 Johan Johansson
 
    Licensed under the GPLv3
 
