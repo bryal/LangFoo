@@ -4,6 +4,8 @@
 {-# LANGUAGE PostfixOperators  #-}
 {-# LANGUAGE TupleSections     #-}
 
+module Parse where
+
 import           Data.Char
 import           Data.List
 import           Data.Maybe
@@ -128,6 +130,9 @@ parse ((:*) l) s        = parseStar l s
 parseExact :: Eq c => Parser out c -> [c] -> Maybe out
 parseExact l s = maybeDone (parse l s)
 
+parseExact' :: Eq c => Parser out c -> [c] -> out
+parseExact' l s = fromJust (parseExact l s)
+
 mapRec :: ([c] -> b) -> Parser a c -> Parser b c
 mapRec f l = Map f (Recognize l)
 
@@ -225,4 +230,3 @@ sub        = binop subArg "-" Sub
 expr       = Any [sub, subArg]
 
 -- Operator precedence: *, /, +, -
-
