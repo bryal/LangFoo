@@ -162,24 +162,34 @@ wss = (ws~+)
 wssOpt :: Parser String Char
 wssOpt = (ws~*)
 
--- Expressions
+data Func = Sin
+          | Cos
+          | Exp
+          | Log
+
+instance Show Func where
+  show f = case f of
+    Sin -> "sin"
+    Cos -> "cos"
+    Exp -> "exp"
+    Log -> "log"
+
 data Expr = Const Double
           | Mul Expr Expr
           | Div Expr Expr
           | Add Expr Expr
           | Sub Expr Expr
+          | App Func Expr
+
+showBinop op a b = "(" ++ show a ++ " " ++ op ++ " " ++ show b ++ ")"
 
 instance Show Expr where
-  show e = show' e 0
-    where showBinop name a b n = let n' = n + 5
-                                     indent = replicate n' ' '
-                                 in "(" ++ name ++ " " ++ show' a n' ++ "\n"
-                                             ++ indent ++ show' b n' ++ ")"
-          show' (Const x) n = show x
-          show' (Mul a b) n = showBinop "Mul" a b n
-          show' (Div a b) n = showBinop "Div" a b n
-          show' (Add a b) n = showBinop "Add" a b n
-          show' (Sub a b) n = showBinop "Sub" a b n
+  show (Const x) = show x
+  show (Mul a b) = showBinop "*" a b
+  show (Div a b) = showBinop "/" a b
+  show (Add a b) = showBinop "+" a b
+  show (Sub a b) = showBinop "-" a b
+  show (App f e) = "(" ++ show f ++ " " ++ show e ++ ")"
 
 binop :: Parser Expr Char -> String -> (Expr -> Expr -> Expr) -> Parser Expr Char
 binop arg opName constr =
@@ -187,9 +197,21 @@ binop arg opName constr =
                    in foldl constr (head args) (tail args))
       (((arg ~& wssOpt ~& Str opName ~& wssOpt)~+) ~& arg)
 
-factor :: Parser Expr Char
-factor = Any [ Map Const number
-             , between (Str "(" ~& wssOpt) expr (wssOpt ~& Str ")") ]
+const'     = Map Const number
+funcArg    = Any [ const', parens ]
+
+coreFunc constr name = Map (\_ -> constr) (Str name)
+
+sin' = coreFunc Sin "sin"
+cos' = coreFunc Cos "cos"
+exp' = coreFunc Exp "exp"
+log' = coreFunc Log "log"
+
+func = Any [ sin', cos', exp', log' ]
+
+app        = Map (\((f, _), arg) -> App f arg) (func ~& wss ~& funcArg)
+parens     = between (Str "(" ~& wssOpt) expr (wssOpt ~& Str ")")
+factor     = Any [ const', app, parens ]
 
 mulArg     = factor
 mul        = binop mulArg "*" Mul
@@ -199,6 +221,7 @@ addArg     = Any [div', divArg]
 add        = binop addArg "+" Add
 subArg     = Any [add, addArg]
 sub        = binop subArg "-" Sub
+
 expr       = Any [sub, subArg]
 
 -- Operator precedence: *, /, +, -
