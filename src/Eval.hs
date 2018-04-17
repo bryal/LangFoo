@@ -21,6 +21,7 @@ eval (App Sin e) = RealVal (sin (evalReal e))
 eval (App Cos e) = RealVal (cos (evalReal e))
 eval (App Exp e) = RealVal (exp (evalReal e))
 eval (App Log e) = RealVal (log (evalReal e))
+eval (If p c a)  = if evalBool p then eval c else eval a
 
 evalReal :: Expr -> Double
 evalReal e = case eval e of

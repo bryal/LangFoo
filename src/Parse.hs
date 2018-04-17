@@ -25,6 +25,19 @@ data Parser out c where
   Map       :: (a -> b) -> Parser a c -> Parser b c
   (:*)      :: Parser a c -> Parser [a] c
 
+instance Show c => Show (Parser out c) where
+  show (Ch c) = "'" ++ show c ++ "'"
+  show (Range c1 c2) = "'" ++ show c1 ++"'..'" ++ show c2 ++ "'"
+  show Wildcard = "."
+  show (Str s) = show s
+  show (Recognize p) = show p
+  show (Any ps) = "[" ++ foldr (\p s -> show p ++ "|" ++ s) (show (last ps)) (init ps)
+  show (Seq ps) = foldr (\p s -> show p ++ " " ++ s) (show (last ps)) (init ps)
+  show (Or p1 p2) = "[" ++ show p1 ++ "|" ++ show p2 ++ "]"
+  show (And p1 p2) = show p1 ++ " " ++ show p2
+  show (Map f p) = show p
+  show ((:*) p) = show p ++ "*"
+
 instance IsString (Parser String Char) where
   fromString = Str
 
@@ -95,9 +108,9 @@ parseSeq (l:ls) s      = bindRem' (:) (parseSeq ls) (parse l s)
 
 parseStarFollowedBy :: Eq c => Parser a c -> Parser b c -> [c] -> Result ([a], b) c
 parseStarFollowedBy la lb s = ror (bindRem' (\a (as, b) -> (a:as, b))
-                                          (parse ((la~*) ~& lb))
-                                          (parse la s))
-                                (mapOut ([],) (parse lb s))
+                                            (parse ((la~*) ~& lb))
+                                            (parse la s))
+                                  (mapOut ([],) (parse lb s))
 
 parseAnd :: Eq c => Parser a c -> Parser b c -> [c] -> Result (a, b) c
 parseAnd (And la ((:*) lb)) lc s = mapOut (\(a, (b, c)) -> ((a, b), c))
@@ -138,6 +151,9 @@ mapRec f l = Map f (Recognize l)
 
 between :: Parser a c -> Parser x c -> Parser b c -> Parser x c
 between la l lb = Map (fst . snd) (And la (And l lb))
+
+-- Preceded by
+pre la lb = Map snd (la ~& lb)
 
 digit :: Parser Int Char
 digit = Map digitToInt ('0' `to` '9')
@@ -186,6 +202,7 @@ data Expr = Const Double
           | Add Expr Expr
           | Sub Expr Expr
           | App Func Expr
+          | If Expr Expr Expr
 
 showBinop op a b = "(" ++ show a ++ " " ++ op ++ " " ++ show b ++ ")"
 
@@ -197,6 +214,7 @@ instance Show Expr where
   show (Add a b) = showBinop "+" a b
   show (Sub a b) = showBinop "-" a b
   show (App f e) = "(" ++ show f ++ " " ++ show e ++ ")"
+  show (If p c a) = "(if " ++ show p ++ " then " ++ show c ++ " else " ++ show a ++ ")"
 
 binop :: Parser Expr Char -> String -> (Expr -> Expr -> Expr) -> Parser Expr Char
 binop arg opName constr =
@@ -205,6 +223,10 @@ binop arg opName constr =
       (((arg ~& wssOpt ~& Str opName ~& wssOpt)~+) ~& arg)
 
 const'     = Map Const number
+if'        = Map (\((p, c), a) -> If p c a)
+                 (pre (Str "if" ~& wss)          expr ~&
+                  pre (wss ~& Str "then" ~& wss) expr ~&
+                  pre (wss ~& Str "else" ~& wss) expr)
 funcArg    = Any [ const', parens ]
 
 coreFunc constr name = Map (\_ -> constr) (Str name)
@@ -218,7 +240,7 @@ func = Any [ sin', cos', exp', log' ]
 
 app        = Map (\((f, _), arg) -> App f arg) (func ~& wss ~& funcArg)
 parens     = between (Str "(" ~& wssOpt) expr (wssOpt ~& Str ")")
-factor     = Any [ const', app, parens ]
+factor     = Any [ const', if', app, parens ]
 
 eqArg      = factor
 eq         = binop eqArg "=" Eq
