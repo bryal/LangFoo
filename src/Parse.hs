@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs             #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PostfixOperators  #-}
 {-# LANGUAGE TupleSections     #-}
 
@@ -12,56 +11,18 @@ import           Data.Maybe
 import           Data.String
 import           Prelude     hiding (lex)
 
-data Parser out c where
-  Ch        :: c -> Parser c c
-  Range     :: Ord c => c -> c -> Parser c c
-  Wildcard  :: Parser c c
-  Str       :: [c] -> Parser [c] c
-  Recognize :: Parser a c -> Parser [c] c
-  Any       :: [Parser a c] -> Parser a c
-  Seq       :: [Parser a c] -> Parser [a] c
-  Or        :: Parser a c -> Parser b c -> Parser (Either a b) c
-  And       :: Parser a c -> Parser b c -> Parser (a, b) c
-  Map       :: (a -> b) -> Parser a c -> Parser b c
-  (:*)      :: Parser a c -> Parser [a] c
-
-instance Show c => Show (Parser out c) where
-  show (Ch c) = "'" ++ show c ++ "'"
-  show (Range c1 c2) = "'" ++ show c1 ++"'..'" ++ show c2 ++ "'"
-  show Wildcard = "."
-  show (Str s) = show s
-  show (Recognize p) = show p
-  show (Any ps) = "[" ++ foldr (\p s -> show p ++ "|" ++ s) (show (last ps)) (init ps)
-  show (Seq ps) = foldr (\p s -> show p ++ " " ++ s) (show (last ps)) (init ps)
-  show (Or p1 p2) = "[" ++ show p1 ++ "|" ++ show p2 ++ "]"
-  show (And p1 p2) = show p1 ++ " " ++ show p2
-  show (Map f p) = show p
-  show ((:*) p) = show p ++ "*"
-
-instance IsString (Parser String Char) where
-  fromString = Str
-
-(~*) = (:*)
-(~+) l = l ~: (l~*)
-(~|) = Or
-(~&) = And
-
-(~:) :: Parser a c -> Parser [a] c -> Parser [a] c
-(~:) l ll = Map (\(a, as) -> a:as) (l ~& ll)
-
-(~++) :: Parser [a] c -> Parser [a] c -> Parser [a] c
-(~++) la lb = Map (\(as, bs) -> as ++ bs) (la ~& lb)
-
-to :: Char -> Char -> Parser Char Char
-to = Range
 
 unwrapEither :: Either a a -> a
 unwrapEither (Left a)  = a
 unwrapEither (Right a) = a
 
+
 data Result out c = Ok out [c]
                 | Err
   deriving (Show, Eq)
+
+isErr Err = True
+isErr _   = False
 
 maybeDone :: Result out c -> Maybe out
 maybeDone (Ok out []) = Just out
@@ -78,110 +39,128 @@ ror :: Result out c -> Result out c -> Result out c
 ror a@(Ok _ _) _ = a
 ror _ b          = b
 
-bindRem :: Monoid out => ([c] -> Result out c) -> Result out c -> Result out c
-bindRem mf (Ok a s) = mapOut (mappend a) (mf s)
-bindRem mf Err      = Err
 
-bindRem' :: (a -> b -> out) -> ([c] -> Result b c) -> Result a c -> Result out c
-bindRem' comb mf (Ok a s) = mapOut (comb a) (mf s)
-bindRem' comb mf Err      = Err
+type Parser out c = [c] -> Result out c
 
-parseChar :: (Eq c) => c -> [c] -> Result c c
-parseChar c [] = Err
-parseChar c (c':[]) | c == c'   = Ok c []
-                  | otherwise = Err
-parseChar c s | c == head s = Ok (head s) (tail s)
-            | otherwise   = Err
+ch :: Eq c => c -> Parser c c
+ch c []                  = Err
+ch c (c':[]) | c == c'   = Ok c []
+             | otherwise = Err
+ch c s | c == head s     = Ok (head s) (tail s)
+       | otherwise       = Err
 
-parseRange :: Ord c => c -> c -> [c] -> Result c c
-parseRange start end (c:s) | c >= start && c <= end = Ok c s
-parseRange _ _ _           = Err
+range :: Ord c => c -> c -> Parser c c
+range start end (c:s) | c >= start && c <= end = Ok c s
+range _ _ _           = Err
 
-parseWild :: (Eq c) => [c] -> Result c c
-parseWild []    = Err
-parseWild (c:s) = Ok c s
+to = range
 
-parseSeq :: Eq c => [Parser a c] -> [c] -> Result [a] c
-parseSeq [] s          = Ok [] s
-parseSeq ((:*) l:ls) s = mapOut (uncurry (:)) (parseStarFollowedBy l (Seq ls) s)
-parseSeq (l:ls) s      = bindRem' (:) (parseSeq ls) (parse l s)
+wild :: Parser c c
+wild []    = Err
+wild (c:s) = Ok c s
 
-parseStarFollowedBy :: Eq c => Parser a c -> Parser b c -> [c] -> Result ([a], b) c
-parseStarFollowedBy la lb s = ror (bindRem' (\a (as, b) -> (a:as, b))
-                                            (parse ((la~*) ~& lb))
-                                            (parse la s))
-                                  (mapOut ([],) (parse lb s))
+str :: Eq c => [c] -> Parser [c] c
+str s1 s2 = maybe Err (Ok s1) (stripPrefix s1 s2)
 
-parseAnd :: Eq c => Parser a c -> Parser b c -> [c] -> Result (a, b) c
-parseAnd (And la ((:*) lb)) lc s = mapOut (\(a, (b, c)) -> ((a, b), c))
-                                      (parseAnd la (And (lb~*) lc) s)
-parseAnd ((:*) l) lb s = parseStarFollowedBy l lb s
-parseAnd la       lb s = bindRem' (,) (parse lb) (parse la s)
+recognize :: Parser a c -> Parser [c] c
+recognize p s = mapOk (\_ s' -> (take (length s - length s') s, s')) (p s)
 
-parseStar :: Eq c => Parser a c -> [c] -> Result [a] c
-parseStar l s = case parse l s of
-  Ok a s' -> mapOut (a:) (parseStar l s')
+pany :: [Parser a c] -> Parser a c
+pany ps s = fromMaybe Err (find (not . isErr) (fmap ($ s) ps))
+
+join :: (a -> b -> out) -> Parser a c -> Parser b c -> Parser out c
+join f pa pb = pmap (uncurry f) (pa ~& pb)
+
+rjoin :: (a -> b -> out) -> Result a c -> Parser b c -> Result out c
+rjoin f (Ok a s) p = mapOut (f a) (p s)
+rjoin _ Err _      = Err
+
+appendFirst a (as, b) = (a:as, b)
+
+multi0Then :: Parser a c -> Parser b c -> Parser ([a], b) c
+multi0Then pa pb = pmap unwrapEither (por (join appendFirst
+                                                pa (multi0Then pa pb))
+                                          (pmap ([],)
+                                                pb))
+
+multi1Then :: Parser a c -> Parser b c -> Parser ([a], b) c
+multi1Then pa pb = join appendFirst pa (multi0Then pa pb)
+
+pseq :: [Parser a c] -> Parser [a] c
+pseq []     = Ok []
+pseq (p:ps) = p ~: pseq ps
+
+por :: Parser a c -> Parser b c -> Parser (Either a b) c
+por pa pb s = (pmap Left pa) s `ror` (pmap Right pb) s
+
+(~|) = por
+
+pand :: Parser a c -> Parser b c -> Parser (a, b) c
+pand pa pb s = rjoin (,) (pa s) pb
+
+(~&) = pand
+
+pmap :: (a -> b) -> Parser a c -> Parser b c
+pmap f p s = mapOut f (p s)
+
+multi0 :: Parser a c -> Parser [a] c
+multi0 p s = case p s of
+  Ok a s' -> mapOut (a:) (multi0 p s')
   Err     -> Ok [] s
 
-isErr Err = True
-isErr _   = False
+multi1 :: Parser a c -> Parser [a] c
+multi1 p = p ~: multi0 p
 
-parse :: Eq c => Parser out c -> [c] -> Result out c
-parse (Ch c) s          = parseChar c s
-parse (Range c1 c2) s   = parseRange c1 c2 s
-parse Wildcard s        = parseWild s
-parse (Str s1) s2       = maybe Err (Ok s1) (stripPrefix s1 s2)
-parse (Recognize l) s   = mapOk (\_ s' -> (take (length s - length s') s, s')) (parse l s)
-parse (Any ls) s        = fromMaybe Err (find (not . isErr) (fmap (flip parse s) ls))
-parse (Seq ls) s        = parseSeq ls s
-parse (Or la lb) s      = (mapOut Left (parse la s)) `ror` (mapOut Right (parse lb s))
-parse (And la lb) s     = parseAnd la lb s
-parse (Map f l) s       = mapOut f (parse l s)
-parse ((:*) l) s        = parseStar l s
+(~:) :: Parser a c -> Parser [a] c -> Parser [a] c
+(~:) = join (:)
 
--- | No remains allowed
-parseExact :: Eq c => Parser out c -> [c] -> Maybe out
-parseExact l s = maybeDone (parse l s)
+(~++) :: Parser [a] c -> Parser [a] c -> Parser [a] c
+(~++) = join (++)
 
-parseExact' :: Eq c => Parser out c -> [c] -> out
-parseExact' l s = fromJust (parseExact l s)
+exact ::Parser out c -> [c] -> Maybe out
+exact p s = maybeDone (p s)
+
+exact' :: Parser out c -> [c] -> out
+exact' p s = fromJust (exact p s)
 
 mapRec :: ([c] -> b) -> Parser a c -> Parser b c
-mapRec f l = Map f (Recognize l)
+mapRec f p = pmap f (recognize p)
 
 between :: Parser a c -> Parser x c -> Parser b c -> Parser x c
-between la l lb = Map (fst . snd) (And la (And l lb))
+between pa p pb = pmap (fst . snd) (pand pa (pand p pb))
 
 -- Preceded by
-pre la lb = Map snd (la ~& lb)
+pre pa pb = pmap snd (pa ~& pb)
+
+-------------------------------------------------------------
 
 digit :: Parser Int Char
-digit = Map digitToInt ('0' `to` '9')
+digit = pmap digitToInt ('0' `to` '9')
 
 int :: Parser Int Char
-int = mapRec read (digit~+)
+int = mapRec read (multi1 digit)
 
 float :: Parser Double Char
-float = mapRec read (int ~& Str "." ~& int)
+float = mapRec read (int ~& str "." ~& int)
 
 number :: Parser Double Char
-number = Any [float, Map fromIntegral int]
+number = pany [float, pmap fromIntegral int]
 
 letter :: Parser Char Char
-letter = Any ['a' `to` 'z', 'A' `to` 'Z']
+letter = pany ['a' `to` 'z', 'A' `to` 'Z']
 
 ident :: Parser String Char
-ident = Recognize (letter ~& ((letter ~| digit ~| Ch '_')~*))
+ident = recognize (letter ~& multi0 (letter ~| digit ~| ch '_'))
 
 -- Whitespace
 ws :: Parser Char Char
-ws = Any (map Ch [' ', '\t', '\r', '\n'])
+ws = pany (map ch [' ', '\t', '\r', '\n'])
 
 wss :: Parser String Char
-wss = (ws~+)
+wss = multi1 ws
 
 wssOpt :: Parser String Char
-wssOpt = (ws~*)
+wssOpt = multi0 ws
 
 data Func = Sin
           | Cos
@@ -218,43 +197,35 @@ instance Show Expr where
 
 binop :: Parser Expr Char -> String -> (Expr -> Expr -> Expr) -> Parser Expr Char
 binop arg opName constr =
-  Map (\(as, b) -> let args = (map (fst . fst . fst) as ++ [b])
-                   in foldl constr (head args) (tail args))
-      (((arg ~& wssOpt ~& Str opName ~& wssOpt)~+) ~& arg)
+  pmap (\args -> foldr constr (head args) (tail args))
+       (join (:) arg (multi0 (pre (wssOpt ~& str opName ~& wssOpt) arg)))
 
-const'     = Map Const number
-if'        = Map (\((p, c), a) -> If p c a)
-                 (pre (Str "if" ~& wss)          expr ~&
-                  pre (wss ~& Str "then" ~& wss) expr ~&
-                  pre (wss ~& Str "else" ~& wss) expr)
-funcArg    = Any [ const', parens ]
+const'     = pmap Const number
+if'        = pmap (\((p, c), a) -> If p c a)
+                  (pre (str "if" ~& wss)          expr ~&
+                   pre (wss ~& str "then" ~& wss) expr ~&
+                   pre (wss ~& str "else" ~& wss) expr)
+funcArg    = pany [ const', parens ]
 
-coreFunc constr name = Map (\_ -> constr) (Str name)
+coreFunc constr name = pmap (\_ -> constr) (str name)
 
 sin' = coreFunc Sin "sin"
 cos' = coreFunc Cos "cos"
 exp' = coreFunc Exp "exp"
 log' = coreFunc Log "log"
 
-func = Any [ sin', cos', exp', log' ]
+func = pany [ sin', cos', exp', log' ]
 
-app        = Map (\((f, _), arg) -> App f arg) (func ~& wss ~& funcArg)
-parens     = between (Str "(" ~& wssOpt) expr (wssOpt ~& Str ")")
-factor     = Any [ const', if', app, parens ]
-
-eqArg      = factor
-eq         = binop eqArg "=" Eq
-mulArg     = Any [eq, eqArg]
-mul        = binop mulArg "*" Mul
-divArg     = Any [mul, mulArg]
-div'       = binop divArg "/" Div
-addArg     = Any [div', divArg]
-add        = binop addArg "+" Add
-subArg     = Any [add, addArg]
-sub        = binop subArg "-" Sub
-
-expr       = Any [sub, subArg]
+app        = pmap (\((f, _), arg) -> App f arg) (func ~& wss ~& funcArg)
+parens     = between (str "(" ~& wssOpt) expr (wssOpt ~& str ")")
+factor     = pany [ const', if', app, parens ]
+eq         = binop factor "=" Eq
+mul        = binop eq "*" Mul
+div'       = binop mul "/" Div
+add        = binop div' "+" Add
+sub        = binop add "-" Sub
+expr       = sub
 
 -- Operator precedence: *, /, +, -, =
 
-parseExpr = parseExact' expr
+parseExpr = exact' expr
