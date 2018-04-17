@@ -25,3 +25,22 @@ even' = unwrapFunc (interpret p2)
 -- even' (RealVal 10) -- -> True
 -- even' (RealVal 11) -- -> False
 
+-- fibonacci sequence using lazy lists
+p3 = " let cons = lam a b get_car -> if get_car then a else b             \
+     \   , car  = lam cons -> cons true                                   \
+     \   , cdr  = lam cons -> cons false                                  \
+     \   , nth  = lam n l -> if n = 0 then car l else nth (n - 1) (cdr l) \
+     \   , add  = lam a b -> a + b                                        \
+     \   , or   = lam a b -> if a then true else b                        \
+     \   , zipWith = lam f l1 l2 ->                                       \
+     \       if or (car l1 = nil) (car l2 = nil)                          \
+     \       then nil                                                     \
+     \       else cons (f (car l1) (car l2))                              \
+     \                 (zipWith f (cdr l1) (cdr l2))                      \
+     \   , fibs = cons 0 (cons 1 (zipWith add fibs (cdr fibs)))           \
+     \ in lam n -> nth n fibs                                             "
+fib n = unwrapFunc (interpret p3) (RealVal n)
+
+
+
+

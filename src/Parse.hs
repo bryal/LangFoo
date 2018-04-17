@@ -152,7 +152,7 @@ pre pa pb = pmap snd (pa ~& pb)
 digit :: Parser Char Int
 digit = pmap digitToInt ('0' `to` '9')
 
-int :: Parser Char Int
+int :: Parser Char Integer
 int = mapRec read (multi1 digit)
 
 float :: Parser Char Double
@@ -182,18 +182,22 @@ wssOpt = multi0 ws
 data Val = RealVal Double
          | BoolVal Bool
          | FuncVal (Val -> Val)
+         | NilVal
 
 instance Eq Val where
-  (==) (RealVal a) (RealVal b) = a == b
+  (==) (RealVal a) (RealVal b) = abs (a - b) <= (a / 1000000000)
   (==) (BoolVal a) (BoolVal b) = a == b
+  (==) NilVal      NilVal      = True
   (==) _ _                     = False
 
 instance Show Val where
   show (RealVal x) = show x
   show (BoolVal b) = show b
   show (FuncVal _) = "<FUNCTION>"
+  show NilVal      = "nil"
 
-data Expr = Const Val
+data Expr = Nil
+          | Const Val
           | Var String
           | Eq  Expr Expr
           | Mul Expr Expr
@@ -209,7 +213,7 @@ showBinop op a b = "(" ++ show a ++ " " ++ op ++ " " ++ show b ++ ")"
 
 instance Show Expr where
   show (Const x) = show x
-  show (Var v) = v
+  show (Var v)   = v
   show (Eq  a b) = showBinop "=" a b
   show (Mul a b) = showBinop "*" a b
   show (Div a b) = showBinop "/" a b
@@ -225,9 +229,10 @@ binop arg opName constr =
   pmap (\args -> foldl constr (head args) (tail args))
        (join (:) arg (multi0 (pre (wssOpt ~& str opName ~& wssOpt) arg)))
 
-reserved   = pany (fmap str ["+", "-", "*", "/", "=", "true", "false", "if", "then", "else", "let", "in", "lam"])
+reserved   = pany (fmap str ["+", "-", "*", "/", "=", "true", "false", "nil", "if", "then", "else", "let", "in", "lam"])
 bool       = pany [pconst True (str "true"), pconst False (str "false")]
-val        = pany [pmap RealVal number, pmap BoolVal bool]
+nil        = pconst NilVal (str "nil")
+val        = pany [pmap RealVal number, pmap BoolVal bool, nil]
 const'     = pmap Const val
 var        = pmap Var (pre (pnot reserved) ident)
 if'        = pmap (\((p, c), a) -> If p c a)
