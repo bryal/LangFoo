@@ -186,6 +186,7 @@ instance Show Func where
     Log -> "log"
 
 data Expr = Const Val
+          | Var String
           | Eq  Expr Expr
           | Mul Expr Expr
           | Div Expr Expr
@@ -193,11 +194,13 @@ data Expr = Const Val
           | Sub Expr Expr
           | App Func Expr
           | If Expr Expr Expr
+          | Let String Expr Expr
 
 showBinop op a b = "(" ++ show a ++ " " ++ op ++ " " ++ show b ++ ")"
 
 instance Show Expr where
   show (Const x) = show x
+  show (Var v) = v
   show (Eq  a b) = showBinop "=" a b
   show (Mul a b) = showBinop "*" a b
   show (Div a b) = showBinop "/" a b
@@ -205,6 +208,7 @@ instance Show Expr where
   show (Sub a b) = showBinop "-" a b
   show (App f e) = "(" ++ show f ++ " " ++ show e ++ ")"
   show (If p c a) = "(if " ++ show p ++ " then " ++ show c ++ " else " ++ show a ++ ")"
+  show (Let b v e) = "(let " ++ b ++ " = " ++ show v ++ " in " ++ show e ++ ")"
 
 binop :: Parser Expr Char -> String -> (Expr -> Expr -> Expr) -> Parser Expr Char
 binop arg opName constr =
@@ -214,11 +218,16 @@ binop arg opName constr =
 bool       = pany [pconst True (str "true"), pconst False (str "false")]
 val        = pany [pmap RealVal number, pmap BoolVal bool]
 const'     = pmap Const val
+var        = pmap Var ident
 if'        = pmap (\((p, c), a) -> If p c a)
                   (pre (str "if" ~& wss)          expr ~&
                    pre (wss ~& str "then" ~& wss) expr ~&
                    pre (wss ~& str "else" ~& wss) expr)
-funcArg    = pany [ const', parens ]
+let'       = pmap (\((bnd, val), body) -> Let bnd val body)
+                  (pre (str "let" ~& wss)       ident ~&
+                   pre (wss ~& str "=" ~& wss)  expr  ~&
+                   pre (wss ~& str "in" ~& wss) expr)
+funcArg    = pany [ const', var, parens ]
 
 coreFunc constr name = pmap (\_ -> constr) (str name)
 
@@ -230,8 +239,8 @@ log' = coreFunc Log "log"
 func = pany [ sin', cos', exp', log' ]
 
 app        = pmap (\((f, _), arg) -> App f arg) (func ~& wss ~& funcArg)
-parens     = between (str "(" ~& wssOpt) expr (wssOpt ~& str ")")
-factor     = pany [ const', if', app, parens ]
+parens     = between (str "(" ~& wss) expr (wss ~& str ")")
+factor     = pany [ const', if', let', var, app, parens ]
 eq         = binop factor "=" Eq
 mul        = binop eq "*" Mul
 div'       = binop mul "/" Div
@@ -241,4 +250,4 @@ expr       = sub
 
 -- Operator precedence: *, /, +, -, =
 
-parseExpr = exact' expr
+parseExpr = exact' (between wssOpt expr wssOpt)
