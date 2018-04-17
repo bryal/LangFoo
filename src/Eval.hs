@@ -2,16 +2,8 @@ module Eval where
 
 import           Parse
 
-data Val = RealVal Double
-         | BoolVal Bool
-  deriving Eq
-
-instance Show Val where
-  show (RealVal x) = show x
-  show (BoolVal b) = show b
-
 eval :: Expr -> Val
-eval (Const x)   = RealVal x
+eval (Const x)   = x
 eval (Eq  a b)   = BoolVal (eval a == eval b)
 eval (Mul a b)   = RealVal (evalReal a * evalReal b)
 eval (Div a b)   = RealVal (evalReal a / evalReal b)

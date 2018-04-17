@@ -103,6 +103,9 @@ pand pa pb s = rjoin (,) (pa s) pb
 pmap :: (a -> b) -> Parser a c -> Parser b c
 pmap f p s = mapOut f (p s)
 
+pconst :: out -> Parser a c -> Parser out c
+pconst x = pmap (\a -> x)
+
 multi0 :: Parser a c -> Parser [a] c
 multi0 p s = case p s of
   Ok a s' -> mapOut (a:) (multi0 p s')
@@ -162,6 +165,14 @@ wss = multi1 ws
 wssOpt :: Parser String Char
 wssOpt = multi0 ws
 
+data Val = RealVal Double
+         | BoolVal Bool
+  deriving Eq
+
+instance Show Val where
+  show (RealVal x) = show x
+  show (BoolVal b) = show b
+
 data Func = Sin
           | Cos
           | Exp
@@ -174,7 +185,7 @@ instance Show Func where
     Exp -> "exp"
     Log -> "log"
 
-data Expr = Const Double
+data Expr = Const Val
           | Eq  Expr Expr
           | Mul Expr Expr
           | Div Expr Expr
@@ -200,7 +211,9 @@ binop arg opName constr =
   pmap (\args -> foldr constr (head args) (tail args))
        (join (:) arg (multi0 (pre (wssOpt ~& str opName ~& wssOpt) arg)))
 
-const'     = pmap Const number
+bool       = pany [pconst True (str "true"), pconst False (str "false")]
+val        = pany [pmap RealVal number, pmap BoolVal bool]
+const'     = pmap Const val
 if'        = pmap (\((p, c), a) -> If p c a)
                   (pre (str "if" ~& wss)          expr ~&
                    pre (wss ~& str "then" ~& wss) expr ~&
