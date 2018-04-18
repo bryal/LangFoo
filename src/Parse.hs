@@ -164,8 +164,8 @@ number = pany [float, pmap fromIntegral int]
 letter :: Parser Char Char
 letter = pany ['a' `to` 'z', 'A' `to` 'Z']
 
-ident :: Parser Char String
-ident = recognize (letter ~& multi0 (letter ~| digit ~| ch '_'))
+identTailChar = letter ~| digit ~| ch '_'
+ident = recognize (letter ~& multi0 identTailChar)
 
 commaSep  = interspersed (wssOpt ~& str "," ~& wssOpt)
 parenth p = between (ch '(' ~& wssOpt) p (wssOpt ~& ch ')')
@@ -232,7 +232,7 @@ bool       = pany [pconst True (str "true"), pconst False (str "false")]
 nil        = pconst NilVal (str "nil")
 val        = pany [pmap RealVal number, pmap BoolVal bool, nil]
 const'     = pmap Const val
-var        = pre (pnot reserved) (pmap Var ident)
+var        = pre (pnot (reserved ~& pnot (multi1 identTailChar))) (pmap Var ident)
 if'        = pmap (\((p, c), a) -> If p c a)
                   (pre (str "if" ~& wss)          expr ~&
                    pre (wss ~& str "then" ~& wss) expr ~&

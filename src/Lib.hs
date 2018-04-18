@@ -1,4 +1,4 @@
-module Lib where
+module Lib (interpret) where
 
 import           Eval
 import           Parse

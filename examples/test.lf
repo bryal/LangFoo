@@ -1,0 +1,35 @@
+let or   = lam a b -> if a then true else b,
+    flip = lam f a b -> f b a,
+
+    cons = lam a b get_car -> if get_car then a else b,
+    car  = lam cons -> cons true,
+    cdr  = lam cons -> cons false,
+    nth  = lam n l -> if n = 0 then car l else nth (n - 1) (cdr l),
+    rev  = foldl (flip cons) nil,
+    list2 = lam stack e -> if e = nil then rev stack else list2 (cons e stack),
+    list = list2 nil,
+
+    isEmpty = lam l -> l = nil,
+
+    zipWith = lam f l1 l2 ->
+      if isEmpty l1 `or` isEmpty l2
+      then nil
+      else cons (f (car l1) (car l2))
+                (zipWith f (cdr l1) (cdr l2)),
+    map   = lam f l ->
+      if isEmpty l
+      then l
+      else cons (f (car l)) (map f (cdr l)),
+    foldl = lam f acc l ->
+      if isEmpty l
+      then acc
+      else foldl f (f acc (car l)) (cdr l),
+    foldr = lam f innermost l ->
+      if isEmpty l
+      then innermost
+      else f (car l) (foldr f innermost (cdr l)),
+
+    fibs = cons 0 (cons 1 (zipWith (+) fibs (cdr fibs))),
+    fib  = lam n -> nth n fibs
+
+in foldl (+) 0 (map (*10) (list 1 2 3 4 5 nil))
