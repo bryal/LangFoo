@@ -167,7 +167,8 @@ letter = pany ['a' `to` 'z', 'A' `to` 'Z']
 ident :: Parser Char String
 ident = recognize (letter ~& multi0 (letter ~| digit ~| ch '_'))
 
-commaSep = interspersed (wssOpt ~& str "," ~& wssOpt)
+commaSep  = interspersed (wssOpt ~& str "," ~& wssOpt)
+parenth p = between (ch '(' ~& wssOpt) p (wssOpt ~& ch ')')
 
 -- Whitespace
 ws :: Parser Char Char
@@ -199,11 +200,6 @@ instance Show Val where
 data Expr = Nil
           | Const Val
           | Var String
-          | Eq  Expr Expr
-          | Mul Expr Expr
-          | Div Expr Expr
-          | Add Expr Expr
-          | Sub Expr Expr
           | App Expr Expr
           | If Expr Expr Expr
           | Let [(String, Expr)] Expr
@@ -214,27 +210,29 @@ showBinop op a b = "(" ++ show a ++ " " ++ op ++ " " ++ show b ++ ")"
 instance Show Expr where
   show (Const x) = show x
   show (Var v)   = v
-  show (Eq  a b) = showBinop "=" a b
-  show (Mul a b) = showBinop "*" a b
-  show (Div a b) = showBinop "/" a b
-  show (Add a b) = showBinop "+" a b
-  show (Sub a b) = showBinop "-" a b
   show (App f e) = "(" ++ show f ++ " " ++ show e ++ ")"
   show (If p c a) = "(if " ++ show p ++ " then " ++ show c ++ " else " ++ show a ++ ")"
   show (Let bs e) = "(let " ++ intercalate ", " (fmap (\(b, v) -> b ++ " = " ++ show v) bs) ++ " in " ++ show e ++ ")"
   show (Lambda p e) = "(lam " ++ p ++ " -> " ++ show e ++ ")"
 
-binop :: Parser Char Expr -> String -> (Expr -> Expr -> Expr) -> Parser Char Expr
-binop arg opName constr =
-  pmap (\args -> foldl constr (head args) (tail args))
-       (join (:) arg (multi0 (pre (wssOpt ~& str opName ~& wssOpt) arg)))
+binop :: Parser Char Expr -> Parser Char Expr -> Parser Char Expr
+binop parg pop =
+  pmap (\(first, rest) -> foldl (\lhs (op, arg) -> App (App op lhs) arg) first rest)
+       (parg ~& (multi0 ((between wssOpt pop wssOpt) ~& parg)))
 
+infixified = between (str "`" ~& wssOpt) expr (wssOpt ~& str "`")
+eqOp       = pmap Var (str "=")
+times      = pmap Var (str "*")
+divOp      = pmap Var (str "/")
+plus       = pmap Var (str "+")
+minus      = pmap Var (str "-")
+operator   = pany [eqOp, times, divOp, plus, minus]
 reserved   = pany (fmap str ["+", "-", "*", "/", "=", "true", "false", "nil", "if", "then", "else", "let", "in", "lam"])
 bool       = pany [pconst True (str "true"), pconst False (str "false")]
 nil        = pconst NilVal (str "nil")
 val        = pany [pmap RealVal number, pmap BoolVal bool, nil]
 const'     = pmap Const val
-var        = pmap Var (pre (pnot reserved) ident)
+var        = pre (pnot reserved) (pmap Var ident)
 if'        = pmap (\((p, c), a) -> If p c a)
                   (pre (str "if" ~& wss)          expr ~&
                    pre (wss ~& str "then" ~& wss) expr ~&
@@ -248,15 +246,19 @@ lambda     = pmap (\(params, body) -> foldr Lambda body params)
                    pre (wssOpt ~& str "->" ~& wssOpt) expr)
 arg        = pany [ const', if', let', var, parens ]
 func       = arg
-app        = pmap (\(f, args) -> foldl App f args) (func ~& multi1 (pre wss arg))
-parens     = between (str "(" ~& wssOpt) expr (wssOpt ~& str ")")
+app        = pmap (\(f, args) -> foldl App f args) (func ~& multi1 (pre wssOpt arg))
+preOpApp   = pmap (\(f, args) -> foldl App f args) (operator ~& multi1 (pre wssOpt arg))
+parens     = pany (fmap parenth [ operator
+                                , preOpApp
+                                , expr])
 factor     = pany [ const', if', let', lambda, app, var, parens ]
-eq         = binop factor "=" Eq
-mul        = binop eq "*" Mul
-div'       = binop mul "/" Div
-add        = binop div' "+" Add
-sub        = binop add "-" Sub
-expr       = sub
+eq         = binop factor eqOp
+mul        = binop eq times
+div'       = binop mul divOp
+add        = binop div' plus
+sub        = binop add minus
+userBinop  = binop sub infixified
+expr       = userBinop
 
 -- Operator precedence: *, /, +, -, =
 

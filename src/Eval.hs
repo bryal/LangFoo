@@ -3,22 +3,23 @@ module Eval where
 import           Data.Maybe
 import           Parse
 
-unReal f = FuncVal (RealVal . f . unwrapReal)
+arithmUnopToVal  f  = FuncVal (RealVal . f . unwrapReal)
+arithmBinopToVal op = FuncVal (arithmUnopToVal . op . unwrapReal)
 
 type Env = [(String, Val)]
 
 eval :: Env -> Expr -> Val
 eval env (Const x)            = x
-eval env (Var "sin")          = unReal sin
-eval env (Var "cos")          = unReal cos
-eval env (Var "exp")          = unReal exp
-eval env (Var "log")          = unReal log
+eval env (Var "sin")          = arithmUnopToVal sin
+eval env (Var "cos")          = arithmUnopToVal cos
+eval env (Var "exp")          = arithmUnopToVal exp
+eval env (Var "log")          = arithmUnopToVal log
+eval env (Var "=")            = FuncVal (\a -> FuncVal (BoolVal . (==a)))
+eval env (Var "*")            = arithmBinopToVal (*)
+eval env (Var "/")            = arithmBinopToVal (/)
+eval env (Var "+")            = arithmBinopToVal (+)
+eval env (Var "-")            = arithmBinopToVal (-)
 eval env (Var v)              = fromJust (lookup v env)
-eval env (Eq  a b)            = BoolVal (eval env a == eval env b)
-eval env (Mul a b)            = RealVal (evalReal env a * evalReal env b)
-eval env (Div a b)            = RealVal (evalReal env a / evalReal env b)
-eval env (Add a b)            = RealVal (evalReal env a + evalReal env b)
-eval env (Sub a b)            = RealVal (evalReal env a - evalReal env b)
 eval env (App f e)            = evalFunc env f (eval env e)
 eval env (If pred conseq alt) = if evalBool env pred then eval env conseq else eval env alt
 eval env (Let bnds body)      = let env' = fmap (\(b, v) -> (b, eval env' v)) bnds ++ env
